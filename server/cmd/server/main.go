@@ -61,8 +61,8 @@ func run() error {
 
 	pgxStore := document.NewDefaultPgxStore(dbPool)
 	fileStore := filestore.New(fileStoragePath)
-
-	docHandlers := document.NewHandler(pgxStore, fileStore)
+	docService := document.NewService(pgxStore, fileStore)
+	docHandlers := document.NewHandler(docService)
 	fsHandlers := filestore.NewHandler(fileStore)
 
 	// document endpoints

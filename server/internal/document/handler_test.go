@@ -28,29 +28,22 @@ func setupTestMux(h *Handler) *http.ServeMux {
 
 func TestUploadPendingHandler(t *testing.T) {
 	tests := []struct {
-		name           string
-		body           string
-		setupStoreMock func(*PgxStoreMock)
-		wantStatus     int
-		wantErr        string
-		authEnabled    bool
+		name         string
+		body         string
+		setupService func(*ServiceMock)
+		wantStatus   int
+		wantErr      string
+		authEnabled  bool
 	}{
 		{
 			name: "success",
 			body: `{"file_name": "test.pdf", "content_type": "application/pdf"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				docID := uuid.New()
-				m.CreateFunc = func(ctx context.Context, fileID, userID uuid.UUID, fileName string, filePath string, contentType string) (*Document, error) {
-					return &Document{
-						ID:          docID,
-						UserID:      userID,
-						FileName:    fileName,
-						FilePath:    filePath,
-						ContentType: contentType,
-						Status:      "pending",
-						UploadedAt:  nil,
-						UpdatedAt:   time.Now(),
-						CreatedAt:   time.Now(),
+			setupService: func(m *ServiceMock) {
+				m.UploadPendingFunc = func(ctx context.Context, userID uuid.UUID, fileName, contentType string) (*UploadPendingResponse, error) {
+					return &UploadPendingResponse{
+						ID:        uuid.New(),
+						UploadURL: "/file_store/uploads/test.pdf",
+						StatusURL: "/api/documents/uuid/status",
 					}, nil
 				}
 			},
@@ -58,50 +51,50 @@ func TestUploadPendingHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name:           "unauthorized - no user",
-			body:           `{"file_name": "test.pdf", "content_type": "application/pdf"}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusUnauthorized,
-			wantErr:        "unauthorized",
-			authEnabled:    false,
+			name:         "unauthorized - no user",
+			body:         `{"file_name": "test.pdf", "content_type": "application/pdf"}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusUnauthorized,
+			wantErr:      "unauthorized",
+			authEnabled:  false,
 		},
 		{
-			name:           "invalid json",
-			body:           `invalid`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid request",
-			authEnabled:    true,
+			name:         "invalid json",
+			body:         `invalid`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid request",
+			authEnabled:  true,
 		},
 		{
-			name:           "empty filename",
-			body:           `{"file_name": "", "content_type": "application/pdf"}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid file name",
-			authEnabled:    true,
+			name:         "empty filename",
+			body:         `{"file_name": "", "content_type": "application/pdf"}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid file name",
+			authEnabled:  true,
 		},
 		{
-			name:           "path traversal in filename",
-			body:           `{"file_name": "../etc/passwd", "content_type": "application/pdf"}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid file name",
-			authEnabled:    true,
+			name:         "path traversal in filename",
+			body:         `{"file_name": "../etc/passwd", "content_type": "application/pdf"}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid file name",
+			authEnabled:  true,
 		},
 		{
-			name:           "empty content type",
-			body:           `{"file_name": "test.pdf", "content_type": ""}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid content type",
-			authEnabled:    true,
+			name:         "empty content type",
+			body:         `{"file_name": "test.pdf", "content_type": ""}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid content type",
+			authEnabled:  true,
 		},
 		{
-			name: "db error",
+			name: "service error",
 			body: `{"file_name": "test.pdf", "content_type": "application/pdf"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.CreateFunc = func(ctx context.Context, fileID, userID uuid.UUID, fileName string, filePath string, contentType string) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.UploadPendingFunc = func(ctx context.Context, userID uuid.UUID, fileName, contentType string) (*UploadPendingResponse, error) {
 					return nil, assert.AnError
 				}
 			},
@@ -113,10 +106,10 @@ func TestUploadPendingHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStore := &PgxStoreMock{}
-			tt.setupStoreMock(mockStore)
+			mockSvc := &ServiceMock{}
+			tt.setupService(mockSvc)
 
-			h := NewHandler(mockStore, nil)
+			h := NewHandler(mockSvc)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/documents", strings.NewReader(tt.body))
 			if tt.authEnabled {
@@ -149,22 +142,22 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 	docID := uuid.New()
 
 	tests := []struct {
-		name           string
-		docID          string
-		body           string
-		setupStoreMock func(*PgxStoreMock)
-		wantStatus     int
-		wantErr        string
-		authEnabled    bool
+		name         string
+		docID        string
+		body         string
+		setupService func(*ServiceMock)
+		wantStatus   int
+		wantErr      string
+		authEnabled  bool
 	}{
 		{
 			name:  "success",
 			docID: docID.String(),
 			body:  `{"status": "uploaded", "file_size": 1024, "checksum": "abc123"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     testUserUUID,
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -174,15 +167,14 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 						CreatedAt:  time.Now(),
 					}, nil
 				}
-				m.UpdateFunc = func(ctx context.Context, id uuid.UUID, req *UpdateRequest) (*Document, error) {
+				m.UpdateStatusFunc = func(ctx context.Context, userID, docID uuid.UUID, status string, fileSize int, checksum string) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     testUserUUID,
 						FileName:   "test.pdf",
-						FilePath:   "/path/test.pdf",
-						Status:     req.Status,
-						FileSize:   req.FileSize,
-						Checksum:   req.Checksum,
+						Status:     status,
+						FileSize:   fileSize,
+						Checksum:   checksum,
 						UploadedAt: nil,
 						UpdatedAt:  time.Now(),
 						CreatedAt:  time.Now(),
@@ -193,29 +185,29 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name:           "unauthorized - no user",
-			docID:          docID.String(),
-			body:           `{"status": "uploaded"}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusUnauthorized,
-			wantErr:        "unauthorized",
-			authEnabled:    false,
+			name:         "unauthorized - no user",
+			docID:        docID.String(),
+			body:         `{"status": "uploaded"}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusUnauthorized,
+			wantErr:      "unauthorized",
+			authEnabled:  false,
 		},
 		{
-			name:           "invalid id format",
-			docID:          "invalid",
-			body:           `{"status": "uploaded"}`,
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid id",
-			authEnabled:    true,
+			name:         "invalid id format",
+			docID:        "invalid",
+			body:         `{"status": "uploaded"}`,
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid id",
+			authEnabled:  true,
 		},
 		{
 			name:  "document not found",
 			docID: docID.String(),
 			body:  `{"status": "uploaded"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return nil, assert.AnError
 				}
 			},
@@ -227,10 +219,10 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 			name:  "forbidden - wrong user",
 			docID: docID.String(),
 			body:  `{"status": "uploaded"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     uuid.New(),
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -249,10 +241,10 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 			name:  "invalid request body",
 			docID: docID.String(),
 			body:  `invalid`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     testUserUUID,
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -268,13 +260,13 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name:  "db update error",
+			name:  "service error",
 			docID: docID.String(),
 			body:  `{"status": "uploaded"}`,
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     testUserUUID,
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -284,7 +276,7 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 						CreatedAt:  time.Now(),
 					}, nil
 				}
-				m.UpdateFunc = func(ctx context.Context, id uuid.UUID, req *UpdateRequest) (*Document, error) {
+				m.UpdateStatusFunc = func(ctx context.Context, userID, docID uuid.UUID, status string, fileSize int, checksum string) (*Document, error) {
 					return nil, assert.AnError
 				}
 			},
@@ -296,10 +288,10 @@ func TestUpdateDocumentStatusHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStore := &PgxStoreMock{}
-			tt.setupStoreMock(mockStore)
+			mockSvc := &ServiceMock{}
+			tt.setupService(mockSvc)
 
-			h := NewHandler(mockStore, nil)
+			h := NewHandler(mockSvc)
 
 			req := httptest.NewRequest(http.MethodPatch, "/api/documents/"+tt.docID+"/status", strings.NewReader(tt.body))
 			if tt.authEnabled && tt.docID != "invalid" {
@@ -332,20 +324,20 @@ func TestGetDocumentHandler(t *testing.T) {
 	docID := uuid.New()
 
 	tests := []struct {
-		name           string
-		docID          string
-		setupStoreMock func(*PgxStoreMock)
-		wantStatus     int
-		wantErr        string
-		authEnabled    bool
+		name         string
+		docID        string
+		setupService func(*ServiceMock)
+		wantStatus   int
+		wantErr      string
+		authEnabled  bool
 	}{
 		{
 			name:  "success",
 			docID: docID.String(),
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     testUserUUID,
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -360,26 +352,26 @@ func TestGetDocumentHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name:           "unauthorized - no user",
-			docID:          docID.String(),
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusUnauthorized,
-			wantErr:        "unauthorized",
-			authEnabled:    false,
+			name:         "unauthorized - no user",
+			docID:        docID.String(),
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusUnauthorized,
+			wantErr:      "unauthorized",
+			authEnabled:  false,
 		},
 		{
-			name:           "invalid id format",
-			docID:          "invalid",
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusBadRequest,
-			wantErr:        "invalid id",
-			authEnabled:    true,
+			name:         "invalid id format",
+			docID:        "invalid",
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusBadRequest,
+			wantErr:      "invalid id",
+			authEnabled:  true,
 		},
 		{
 			name:  "document not found",
 			docID: docID.String(),
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return nil, assert.AnError
 				}
 			},
@@ -390,10 +382,10 @@ func TestGetDocumentHandler(t *testing.T) {
 		{
 			name:  "forbidden - wrong user",
 			docID: docID.String(),
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByIDFunc = func(ctx context.Context, id uuid.UUID) (*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.GetDocumentFunc = func(ctx context.Context, userID, docID uuid.UUID) (*Document, error) {
 					return &Document{
-						ID:         id,
+						ID:         docID,
 						UserID:     uuid.New(),
 						FileName:   "test.pdf",
 						FilePath:   "/path/test.pdf",
@@ -412,10 +404,10 @@ func TestGetDocumentHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStore := &PgxStoreMock{}
-			tt.setupStoreMock(mockStore)
+			mockSvc := &ServiceMock{}
+			tt.setupService(mockSvc)
 
-			h := NewHandler(mockStore, nil)
+			h := NewHandler(mockSvc)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/documents/"+tt.docID, nil)
 			if tt.authEnabled && tt.docID != "invalid" {
@@ -441,22 +433,20 @@ func TestGetDocumentHandler(t *testing.T) {
 			}
 		})
 	}
-
-	_ = testUserUUID
 }
 
 func TestListDocumentsHandler(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupStoreMock func(*PgxStoreMock)
-		wantStatus     int
-		wantErr        string
-		authEnabled    bool
+		name         string
+		setupService func(*ServiceMock)
+		wantStatus   int
+		wantErr      string
+		authEnabled  bool
 	}{
 		{
 			name: "success",
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByUserIDFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.ListDocumentsFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
 					return []*Document{
 						{
 							ID:         uuid.New(),
@@ -485,16 +475,16 @@ func TestListDocumentsHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name:           "unauthorized - no user",
-			setupStoreMock: func(m *PgxStoreMock) {},
-			wantStatus:     http.StatusUnauthorized,
-			wantErr:        "unauthorized",
-			authEnabled:    false,
+			name:         "unauthorized - no user",
+			setupService: func(m *ServiceMock) {},
+			wantStatus:   http.StatusUnauthorized,
+			wantErr:      "unauthorized",
+			authEnabled:  false,
 		},
 		{
 			name: "success - empty list",
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByUserIDFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
+			setupService: func(m *ServiceMock) {
+				m.ListDocumentsFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
 					return []*Document{}, nil
 				}
 			},
@@ -502,9 +492,9 @@ func TestListDocumentsHandler(t *testing.T) {
 			authEnabled: true,
 		},
 		{
-			name: "db error",
-			setupStoreMock: func(m *PgxStoreMock) {
-				m.GetByUserIDFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
+			name: "service error",
+			setupService: func(m *ServiceMock) {
+				m.ListDocumentsFunc = func(ctx context.Context, userID uuid.UUID) ([]*Document, error) {
 					return nil, assert.AnError
 				}
 			},
@@ -516,10 +506,10 @@ func TestListDocumentsHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStore := &PgxStoreMock{}
-			tt.setupStoreMock(mockStore)
+			mockSvc := &ServiceMock{}
+			tt.setupService(mockSvc)
 
-			h := NewHandler(mockStore, nil)
+			h := NewHandler(mockSvc)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/documents", nil)
 			if tt.authEnabled {
@@ -545,4 +535,44 @@ func TestListDocumentsHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandler_UploadPendingHandler_AuthValidation(t *testing.T) {
+	h := NewHandler(&ServiceMock{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/documents", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	h.UploadPendingHandler(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_GetDocumentHandler_AuthValidation(t *testing.T) {
+	h := NewHandler(&ServiceMock{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/documents/"+uuid.New().String(), nil)
+	w := httptest.NewRecorder()
+	h.GetDocumentHandler(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_ListDocumentsHandler_AuthValidation(t *testing.T) {
+	h := NewHandler(&ServiceMock{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/documents", nil)
+	w := httptest.NewRecorder()
+	h.ListDocumentsHandler(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_UpdateDocumentStatusHandler_AuthValidation(t *testing.T) {
+	h := NewHandler(&ServiceMock{})
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/documents/"+uuid.New().String()+"/status", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	h.UpdateDocumentStatusHandler(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }

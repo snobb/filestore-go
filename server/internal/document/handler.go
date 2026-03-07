@@ -2,16 +2,13 @@ package document
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"server/internal/auth"
-	"server/internal/filestore"
 )
 
 type UploadPendingRequest struct {
@@ -32,14 +29,12 @@ type UpdateStatusRequest struct {
 }
 
 type Handler struct {
-	store     PgxStore
-	filestore filestore.FileStore
+	service Service
 }
 
-func NewHandler(store PgxStore, filestore filestore.FileStore) *Handler {
+func NewHandler(service Service) *Handler {
 	return &Handler{
-		store:     store,
-		filestore: filestore,
+		service: service,
 	}
 }
 
@@ -63,7 +58,6 @@ func (h *Handler) UploadPendingHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserID(r.Context())
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
-		// XXX: ignore errors at this point, but normally need to handle.
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error": "unauthorized",
 		})
@@ -80,7 +74,6 @@ func (h *Handler) UploadPendingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: improve validation - naive protection against path injection.
 	if req.FileName == "" || strings.Contains(req.FileName, "..") {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{
@@ -89,7 +82,6 @@ func (h *Handler) UploadPendingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: improve validation - content type is required.
 	if req.ContentType == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{
@@ -108,22 +100,10 @@ func (h *Handler) UploadPendingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileID := uuid.New()
-	sanitizedFileName := filepath.Base(req.FileName)
-
-	// path to store in DB - /{userID}/{fileID}_{filename}.{ext}
-	storePath := filepath.Join(userID,
-		fmt.Sprintf("%s_%s", fileID.String(), sanitizedFileName))
-
-	// path to store on disk /{storage-path}/{userID}/{fileID}_{filename}.{ext}
-	uploadPath := filepath.Join(filestore.UploadBasePrefix, storePath)
-
-	doc, err := h.store.Create(
+	resp, err := h.service.UploadPending(
 		r.Context(),
-		fileID,
 		userUUID,
 		req.FileName,
-		storePath,
 		req.ContentType,
 	)
 	if err != nil {
@@ -136,12 +116,7 @@ func (h *Handler) UploadPendingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	err = json.NewEncoder(w).Encode(UploadPendingResponse{
-		ID:        doc.ID,
-		UploadURL: uploadPath,
-		StatusURL: fmt.Sprintf("/api/documents/%s/status", doc.ID.String()),
-	})
-	if err != nil {
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("unable to encode response", "error", err.Error())
 	}
 }
@@ -181,7 +156,15 @@ func (h *Handler) UpdateDocumentStatusHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	doc, err := h.store.GetByID(r.Context(), id)
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		slog.Error("invalid user ID", "error", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		return
+	}
+
+	doc, err := h.service.GetDocument(r.Context(), userUUID, id)
 	if err != nil {
 		slog.Error("unable to load document", "error", err.Error())
 		w.WriteHeader(http.StatusNotFound)
@@ -203,11 +186,14 @@ func (h *Handler) UpdateDocumentStatusHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	updatedDoc, err := h.store.Update(r.Context(), id, &UpdateRequest{
-		Status:   req.Status,
-		FileSize: req.FileSize,
-		Checksum: req.Checksum,
-	})
+	updatedDoc, err := h.service.UpdateStatus(
+		r.Context(),
+		userUUID,
+		id,
+		req.Status,
+		req.FileSize,
+		req.Checksum,
+	)
 	if err != nil {
 		slog.Error("unable to update document", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
@@ -244,7 +230,14 @@ func (h *Handler) GetDocumentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := h.store.GetByID(r.Context(), id)
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid user ID"})
+		return
+	}
+
+	doc, err := h.service.GetDocument(r.Context(), userUUID, id)
 	if err != nil {
 		slog.Error("unable to load document", "error", err.Error(), "id", id.String())
 		w.WriteHeader(http.StatusNotFound)
@@ -290,7 +283,7 @@ func (h *Handler) ListDocumentsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	docs, err := h.store.GetByUserID(r.Context(), userUUID)
+	docs, err := h.service.ListDocuments(r.Context(), userUUID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		slog.Error("unable to load documents", "error", err.Error())
