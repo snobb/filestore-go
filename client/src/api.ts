@@ -1,6 +1,8 @@
 const API_BASE = "";
 
-const USER_ID = "00000000-0000-0000-0000-000000000000";
+function getStoredToken() {
+  return localStorage.getItem("auth_token");
+}
 
 export interface Document {
   id: string;
@@ -31,11 +33,13 @@ export async function requestRaw<T>(
   url: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const token = getStoredToken();
+
   const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-User-ID": USER_ID,
+      ...(token && { "Authorization": `Bearer ${token}` }),
       ...options.headers,
     },
   });
@@ -49,11 +53,13 @@ export async function requestRaw<T>(
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getStoredToken();
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-User-ID": USER_ID,
+      ...(token && { "Authorization": `Bearer ${token}` }),
       ...options.headers,
     },
   });
@@ -100,10 +106,12 @@ export async function uploadFile(
   uploadUrl: string,
   file: File,
 ): Promise<FileInfo> {
+  const token = getStoredToken();
+
   const response = await fetch(`${API_BASE}${uploadUrl}`, {
     method: "POST",
     headers: {
-      "X-User-ID": USER_ID,
+      ...(token && { "Authorization": `Bearer ${token}` }),
     },
     body: file,
   });

@@ -26,6 +26,8 @@ services:
       - ./filestore:/filestore
     environment:
       - POSTGRES_HOST=db
+      - DATABASE_PEPPER="some_black_pepper"
+      - JWT_SECRET="some_jwt_secret"
       - FILE_STORAGE_PATH=/filestore
     depends_on:
       db:

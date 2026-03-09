@@ -12,9 +12,10 @@ import (
 	"server/internal/document"
 	"server/internal/filestore"
 	"server/internal/pglib"
+	"server/internal/user"
 )
 
-func JSONMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func JSONMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("content-type", "application/json")
 		next.ServeHTTP(w, r)
@@ -44,6 +45,16 @@ func run() error {
 		fileStoragePath = "/filestore"
 	}
 
+	pepper := os.Getenv("DATABASE_PEPPER")
+	if pepper == "" {
+		log.Fatal("CRITICAL ERROR: DATABASE_PEPPER environment variable is not set.")
+	}
+
+	jwtKey := os.Getenv("JWT_SECRET")
+	if jwtKey == "" {
+		log.Fatal("CRITICAL ERROR: JWT_SECRET environment variable is not set.")
+	}
+
 	dbConfig := pglib.Config{
 		Host:     hostname,
 		Port:     5432,
@@ -59,31 +70,53 @@ func run() error {
 
 	mux := http.NewServeMux()
 
-	pgxStore := document.NewDefaultPgxStore(dbPool)
+	userPgxStore := user.NewDefaultPgxStore(dbPool)
+	userService := user.NewDefaultService(
+		userPgxStore,
+		[]byte(pepper),
+		0, // use default
+		0, // use default
+		[]byte(jwtKey),
+	)
+	userHandlers := user.NewHandler(userService)
+
 	fileStore := filestore.New(fileStoragePath)
-	docService := document.NewService(pgxStore, fileStore)
-	docHandlers := document.NewHandler(docService)
 	fsHandlers := filestore.NewHandler(fileStore)
 
-	// document endpoints
-	mux.HandleFunc("POST /api/documents",
-		JSONMiddleware(docHandlers.UploadPendingHandler))
-	mux.HandleFunc("GET /api/documents",
-		JSONMiddleware(docHandlers.ListDocumentsHandler))
-	mux.HandleFunc("PATCH /api/documents/{id}/status",
-		JSONMiddleware(docHandlers.UpdateDocumentStatusHandler))
-	mux.HandleFunc("GET /api/documents/{id}",
-		JSONMiddleware(docHandlers.GetDocumentHandler))
+	docPgxStore := document.NewDefaultPgxStore(dbPool)
+	docService := document.NewService(docPgxStore, fileStore)
+	docHandlers := document.NewHandler(docService)
+
+	// JWT middleware for protected routes
+	jwtMiddleware := auth.NewJWTMiddleware([]byte(jwtKey))
+
+	// user endpoints (public)
+	mux.Handle("POST /api/auth/register",
+		JSONMiddleware(http.HandlerFunc(userHandlers.Register)))
+	mux.Handle("POST /api/auth/login",
+		JSONMiddleware(http.HandlerFunc(userHandlers.Login)))
+
+	// document endpoints (protected)
+	mux.Handle("POST /api/documents",
+		JSONMiddleware(jwtMiddleware.Middleware(http.HandlerFunc(docHandlers.UploadPendingHandler))))
+	mux.Handle("GET /api/documents",
+		JSONMiddleware(jwtMiddleware.Middleware(http.HandlerFunc(docHandlers.ListDocumentsHandler))))
+	mux.Handle("PATCH /api/documents/{id}/status",
+		JSONMiddleware(jwtMiddleware.Middleware(http.HandlerFunc(docHandlers.UpdateDocumentStatusHandler))))
+	mux.Handle("GET /api/documents/{id}",
+		JSONMiddleware(jwtMiddleware.Middleware(http.HandlerFunc(docHandlers.GetDocumentHandler))))
 
 	// filestore endpoints
-	mux.HandleFunc("/file_store/uploads/", fsHandlers.UploadFileHandler)
-	mux.HandleFunc("/file_store/downloads/", fsHandlers.DownloadFileHandler)
+	mux.Handle("/file_store/uploads/",
+		jwtMiddleware.Middleware(http.HandlerFunc(fsHandlers.UploadFileHandler)))
+	mux.Handle("/file_store/downloads/",
+		jwtMiddleware.Middleware(http.HandlerFunc(fsHandlers.DownloadFileHandler)))
 
 	// react endpoints - register last as catchall
 	registerReactFiles(mux)
 
 	slog.Info("listening on port 3000")
-	return http.ListenAndServe(":3000", auth.MockAuthMiddleware(mux))
+	return http.ListenAndServe(":3000", mux)
 }
 
 func registerReactFiles(mux *http.ServeMux) {
