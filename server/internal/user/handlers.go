@@ -61,8 +61,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds := h.service.(*DefaultService)
-	token, err := ds.GenerateToken(user)
+	token, err := h.service.GenerateToken(user)
 	if err != nil {
 		slog.Error("unable to generate token", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
@@ -107,8 +106,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds := h.service.(*DefaultService)
-	token, err := ds.GenerateToken(user)
+	token, err := h.service.GenerateToken(user)
 	if err != nil {
 		slog.Error("unable to generate token", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)

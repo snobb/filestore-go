@@ -9,4 +9,5 @@ import (
 type Service interface {
 	Register(ctx context.Context, email, username, password string) (*User, error)
 	ValidatePassword(ctx context.Context, email, password string) (*User, error)
+	GenerateToken(user *User) (string, error)
 }
