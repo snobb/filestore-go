@@ -1,0 +1,12 @@
+FROM alpine:3.19
+
+RUN apk add --no-cache postgresql-client nodejs npm
+
+RUN npm install -g dbmate@2
+
+WORKDIR /app
+
+COPY .env ./
+COPY db ./db
+
+ENTRYPOINT ["dbmate", "-e", "DATABASE_URL"]

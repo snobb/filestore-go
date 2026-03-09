@@ -1,9 +1,12 @@
+-- migrate:up
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT NOT NULL UNIQUE,
     username TEXT NOT NULL UNIQUE,
     hashed_password TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    iterations INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -31,6 +34,10 @@ UNIQUE (user_id, file_name);
 ALTER TABLE documents ADD CONSTRAINT fk_documents_user
 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
--- Demo user
-INSERT INTO users (id, email, username, hashed_password)
-VALUES ('00000000-0000-0000-0000-000000000000', 'test@snobb.org', 'DemoClient', 'nopassword');
+-- migrate:down
+
+DROP TABLE IF EXISTS documents;
+
+DROP TABLE IF EXISTS users;
+
+DROP TYPE IF EXISTS doc_status;
