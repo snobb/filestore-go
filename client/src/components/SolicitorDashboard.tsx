@@ -36,7 +36,7 @@ export function SolicitorDashboard() {
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: "800px", margin: "0 auto" }}>
+    <main>
       <h1>Solicitor Dashboard</h1>
       <p>Review uploaded documents</p>
 
@@ -91,6 +91,6 @@ export function SolicitorDashboard() {
           </tbody>
         </table>
       )}
-    </div>
+    </main>
   );
 }

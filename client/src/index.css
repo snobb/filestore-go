@@ -66,3 +66,33 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+main {
+  margin: auto;
+  max-width:980px;
+  padding:24px 16px;
+  font-family:sans-serif
+}
+.docs-grid {
+  display:grid;
+  gap:10px;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  padding-left:8px;
+  padding-right:8px
+}
+.docs-tile {
+  border:1px solid #b8b8b8;
+  border-radius:5px;
+  padding:10px
+}
+.docs-title {
+  font-style: italic;
+  font-weight: 600;
+  margin:0 0 8px
+}
+.docs-meta {
+  margin:0
+}
+.docs-meta+.docs-meta {
+  margin-top:4px
+}

@@ -86,7 +86,7 @@ export function UserUpload() {
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: "600px", margin: "0 auto" }}>
+    <main>
       <h1>Document Upload</h1>
       <p>Upload your documents (PDF or image)</p>
 
@@ -126,46 +126,15 @@ export function UserUpload() {
       {documents.length === 0 ? (
         <p>No documents uploaded yet.</p>
       ) : (
-        <div
-          style={{
-            display: "table",
-            width: "100%",
-            borderCollapse: "collapse",
-          }}
-        >
-          <div style={{ display: "table-header-group" }}>
-            <div
-              style={{
-                display: "table-row",
-                borderBottom: "1px solid #ccc",
-                fontWeight: "bold",
-              }}
-            >
-              <div style={{ display: "table-cell", padding: "8px" }}>
-                File Name
-              </div>
-              <div style={{ display: "table-cell", padding: "8px" }}>
-                Status
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "table-row-group" }}>
-            {documents.map((doc) => (
-              <div
-                key={doc.id}
-                style={{ display: "table-row", borderBottom: "1px solid #eee" }}
-              >
-                <div style={{ display: "table-cell", padding: "8px" }}>
-                  {doc.file_name}
-                </div>
-                <div style={{ display: "table-cell", padding: "8px" }}>
-                  <strong>{doc.status}</strong>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div id="docs-grid" className="docs-grid">
+          {documents.map((doc) => (
+            <article className="docs-tile" key={doc.id}>
+              <p className="docs-title">{doc.file_name}</p>
+              <p className="docs-meta">Status: {doc.status}</p>
+            </article>
+          ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }
