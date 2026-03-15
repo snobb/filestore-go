@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres
+    image: docker.io/library/postgres:latest
     restart: unless-stopped
     ports:
       - 5432:5432
@@ -19,7 +19,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: ./Dockerfile
+      dockerfile: ./Containerfile
     ports:
       - 3000:3000
     volumes:

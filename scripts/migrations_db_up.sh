@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 
-docker compose up -d db
+podman compose up -d db

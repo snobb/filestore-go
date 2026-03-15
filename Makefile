@@ -9,7 +9,7 @@ DATABASE_URL := postgres://postgres:postgres@localhost:5432/filestore?sslmode=di
 
 .PHONY: run
 run: db-up ## Run the server
-	docker compose up --build -d server
+	podman compose up --build --force-recreate -d server
 
 .PHONY: db-up
 db-up: ## Start the database
@@ -38,4 +38,4 @@ db-create: ## Create a new migration
 
 .PHONY: build-migrations-image
 build-migrations-image: ## Build the migrations image
-	docker build -t filestore-migrations:latest -f Dockerfile.migrations .
+	podman build -t filestore-migrations:latest -f Containerfile.migrations .
